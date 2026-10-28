@@ -1,0 +1,132 @@
+import pandas as pd
+import ipywidgets as widgets
+from IPython.display import display
+
+# 1. Datasets Load 
+movies_df = pd.read_csv(r"C:\Users\moder\.ipython\movies.csv")
+ratings_df = pd.read_csv(r"C:\Users\moder\.ipython\ratings.csv")
+
+# Merge Data
+movie_data = pd.merge(ratings_df, movies_df, on='movieId')
+
+# ---------------------------------------------------------
+# 2. Logic Functions
+# ---------------------------------------------------------
+def popularity_recommender(genre, t, N):
+    genre_filtered = movie_data[movie_data['genres'].str.contains(genre, case=False, na=False)]
+    
+    grouped = genre_filtered.groupby(['movieId', 'title']).agg(
+        avg_rating=('rating', 'mean'),
+        num_reviews=('rating', 'count')
+    ).reset_index()
+    
+    qualified = grouped[grouped['num_reviews'] >= int(t)]
+    
+    recommendations = qualified.sort_values(
+        by=['avg_rating', 'num_reviews'], 
+        ascending=[False, False]
+    ).head(int(N))
+    
+    recommendations.insert(0, 'Sno.', range(1, 1 + len(recommendations)))
+    recommendations = recommendations.rename(columns={
+        'title': 'Movie Title',
+        'avg_rating': 'Average Movie Rating',
+        'num_reviews': 'Number of Reviews'
+    })
+    
+    return recommendations[['Sno.', 'Movie Title', 'Average Movie Rating', 'Number of Reviews']]
+
+
+def content_based_recommender(movie_title, N):
+    target_match = movies_df[movies_df['title'].str.contains(movie_title, case=False, na=False, regex=False)]
+    
+    if target_match.empty:
+        return pd.DataFrame({'Message': [f"Movie '{movie_title}' not found in dataset."]})
+    
+    target_movie = target_match.iloc[0]
+    target_genres = set(target_movie['genres'].split('|'))
+    target_id = target_movie['movieId']
+    
+    similarity_scores = []
+    
+    for idx, row in movies_df.iterrows():
+        if row['movieId'] == target_id:
+            continue
+        
+        current_genres = set(row['genres'].split('|'))
+        intersection = len(target_genres.intersection(current_genres))
+        union = len(target_genres.union(current_genres))
+        jaccard_sim = intersection / union if union > 0 else 0
+        
+        similarity_scores.append({
+            'Movie Title': row['title'],
+            'Genres': row['genres'],
+            'Similarity Score': round(jaccard_sim, 3)
+        })
+    
+    sim_df = pd.DataFrame(similarity_scores)
+    recs = sim_df.sort_values(by='Similarity Score', ascending=False).head(int(N))
+    recs.insert(0, 'Sno.', range(1, 1 + len(recs)))
+    return recs
+
+# ---------------------------------------------------------
+# 3. GUI Widgets (UI Elements)
+# ---------------------------------------------------------
+
+# Unique Genres Dropdown
+all_genres = sorted(list(set([genre for sublist in movies_df['genres'].dropna().str.split('|') for genre in sublist])))
+
+# Tab 1 Widgets (Popularity Based)
+genre_dropdown = widgets.Dropdown(options=all_genres, description='Genres:')
+min_reviews_input = widgets.BoundedIntText(value=50, min=1, max=10000, description='Minimum Reviews:')
+num_recs_pop = widgets.BoundedIntText(value=10, min=1, max=50, description='Number of Recommendations:', style={'description_width': 'initial'})
+btn_pop = widgets.Button(description='RECOMMEND ME', button_style='primary')
+
+pop_box = widgets.VBox([
+    genre_dropdown,
+    widgets.HBox([min_reviews_input, num_recs_pop]),
+    btn_pop
+])
+
+# Tab 2 Widgets (Content Based)
+movie_input = widgets.Text(value='Toy Story (1995)', description='Movie Title:', style={'description_width': 'initial'})
+num_recs_content = widgets.BoundedIntText(value=10, min=1, max=50, description='Number of Recommendations:', style={'description_width': 'initial'})
+btn_content = widgets.Button(description='RECOMMEND ME', button_style='primary')
+
+content_box = widgets.VBox([
+    movie_input,
+    num_recs_content,
+    btn_content
+])
+
+# Tabs 
+tabs = widgets.Tab(children=[pop_box, content_box])
+tabs.set_title(0, 'Popularity Based Rec')
+tabs.set_title(1, 'Content Based Rec')
+
+# Display Output Area
+out_pop = widgets.Output()
+out_content = widgets.Output()
+
+# ---------------------------------------------------------
+# 4. Button Click Events
+# ---------------------------------------------------------
+def on_btn_pop_clicked(b):
+    with out_pop:
+        out_pop.clear_output()
+        res = popularity_recommender(genre_dropdown.value, min_reviews_input.value, num_recs_pop.value)
+        display(res)
+
+def on_btn_content_clicked(b):
+    with out_content:
+        out_content.clear_output()
+        res = content_based_recommender(movie_input.value, num_recs_content.value)
+        display(res)
+
+btn_pop.on_click(on_btn_pop_clicked)
+btn_content.on_click(on_btn_content_clicked)
+
+# Display UI
+display(tabs)
+display(out_pop)
+display(out_content)
